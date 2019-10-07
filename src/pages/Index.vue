@@ -26,7 +26,7 @@
         dense
         :alert="oItem.bAlert ? 'red' : false"
         :ripple="{center:true}"
-        :class="oConfiguration.oStatusStyles[oItem.sStatus].sStyle"
+        :class="oConfiguration.oStatusStyles[oItem.sStatus].sTabStyle"
       >
         <q-badge 
           :color="oConfiguration.oStatusStyles[oItem.sStatus].sStyle" 
@@ -40,7 +40,10 @@
 
       <q-btn 
         flat 
+        no-caps
         label="Добавить адрес" 
+        class="full-width"
+        icon="add"
         @click="fnShowAddAddressWindow"
       />
 
@@ -119,6 +122,23 @@
       </q-tab-panel>
     </q-tab-panels>
 
+    <q-dialog v-model="bShowErrorWindow">
+      <q-card>
+        <q-card-section>
+          <div class="text-h6">Ошибка</div>
+        </q-card-section>
+
+        <q-card-section>
+          <q-avatar icon="error" color="" text-color="negative" />
+          {{ sErrorWindowMessage }}
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="OK" color="primary" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <q-dialog v-model="bShowAddAddressWindow">
       <q-card>
         <q-card-section>
@@ -128,14 +148,14 @@
         <q-separator />
 
         <q-card-section style="max-height: 50vh" class="scroll">
-          
+          <q-input v-model="oShowAddAddressWindowForm.sIP" label="IP Адрес" />
         </q-card-section>
 
         <q-separator />
 
         <q-card-actions align="right">
           <q-btn flat label="Отмена" color="primary" v-close-popup />
-          <q-btn flat label="Добавить" color="primary" v-close-popup />
+          <q-btn flat label="Добавить" color="primary" v-close-popup @click="fnAddAddress"/>
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -156,11 +176,15 @@ export default {
     return {
       sCurrentTab: '',
       sFilterFileText: '',
+
       bShowAddAddressWindow: false,
-
       oShowAddAddressWindowForm: {
-
+        sIP: ''
       },
+
+      bShowErrorWindow: false,
+
+      sErrorWindowMessage: '',
 
       oConnections: {
 
@@ -199,9 +223,22 @@ export default {
   },
 
   methods: {
+    fnShowErrorMessage(sErrorWindowMessage)
+    {
+      this.bShowErrorWindow = true
+      this.sErrorWindowMessage = sErrorWindowMessage
+    },
+    fnAddAddress()
+    {
+      if (this.oComputersList[this.oShowAddAddressWindowForm.sIP]) {
+        this.fnShowErrorMessage("Адрес уже добавлен")
+      }
+      this.oShowAddAddressWindowForm.sIP
+    },
     fnShowAddAddressWindow()
     {
-
+      this.oShowAddAddressWindowForm.sIP = ''
+      this.bShowAddAddressWindow = true
     },
     fnFilterItem(oItem)
     {

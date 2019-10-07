@@ -42,14 +42,17 @@ export default {
         oStatusStyles: {
           'offline': {
             sStyle: 'grey',
+            sTabStyle: 'bg-grey-3',
             sName: 'Не в сети'
           },
           'blocked': {
             sStyle: 'red',
+            sTabStyle: 'bg-red-3',
             sName: 'Заблокирован'
           },
           'accessed': {
             sStyle: 'green',
+            sTabStyle: 'bg-green-3',
             sName: 'Доступен'
           }
         },
