@@ -167,6 +167,7 @@
 import moment from 'moment'
 import _ from 'lodash'
 import Vue from 'Vue'
+import path from 'path'
 
 export default {
   name: 'PageIndex',
@@ -230,9 +231,12 @@ export default {
     },
     fnAddAddress()
     {
-      if (this.oComputersList[this.oShowAddAddressWindowForm.sIP]) {
-        this.fnShowErrorMessage("Адрес уже добавлен")
+      var sIP = this.oShowAddAddressWindowForm.sIP
+      
+      if (this.oComputersList[sIP]) {
+        return this.fnShowErrorMessage(`Адрес '${sIP}' уже есть в списке`)
       }
+
       this.oShowAddAddressWindowForm.sIP
     },
     fnShowAddAddressWindow()
@@ -268,11 +272,26 @@ export default {
 
       return (aArray || []).slice().reverse()
     },
-    fnSendFile(sFilePath, sAddress)
+    fnSendObject(sAddress, oObject)
     {
       var oWebSocket = this.fnConnect(sAddress)
 
-      oWebSocket.send(sFilePath)
+      oWebSocket.send(JSON.stringify(oObject))
+    },
+    fnSendFile(sFilePath, sAddress)
+    {
+      try {
+        var oBuffer = fs.readFileSync(sFilePath)
+        var oData = {
+          sType: "file",
+          sFileName: path.basename(sFilePath),
+          sPackedBuffer: JSON.stringify(oBuffer)
+        }
+
+        fnSendObject(sAddress, oData)
+      } catch(oError) {
+        console.error(oError)
+      }
     },
     fnConnect(sAddress)
     {
@@ -281,8 +300,7 @@ export default {
         return this.oConnections[sAddress]
       }
 
-      //var oWebSocket = new WebSocket(`ws://${sAddress}:3030`)
-      var oWebSocket = new WebSocket(`ws://127.0.0.1:3030`)
+      var oWebSocket = new WebSocket(`ws://${sAddress}:3030`)
 
       oWebSocket.onopen = function () {
         oWebSocket.send('oWebSocket onopen')
