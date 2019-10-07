@@ -11,6 +11,8 @@ import path from 'path'
 import moment from 'moment'
 import { Notify } from 'quasar'
 const { ipcRenderer } = require('electron')
+import Vue from 'Vue'
+var evilscan = require('evilscan')
 
 export default {
   name: 'App',
@@ -25,12 +27,16 @@ export default {
 
       oConfiguration: {
         sCurrentTab: '',
+        bScanLocalNetworks: false,
 
         oCurrentComputer: {
+          sSelectedInterface: '',
+          iSelectedIPIndex: -1,
+          sSelectedIP: '',
           oNetworkInterfaces: {
 
           },
-          sName: 'COMP'
+          sName: ''
         },
 
         oStatusStyles: {
@@ -50,7 +56,7 @@ export default {
 
         oFilesStatusStyles: {
           'wait': {
-            sStyle: 'yellow',
+            sStyle: 'blue',
             sName: 'Ожидает получения',
             sIcon: 'access_time'
           },
@@ -221,6 +227,8 @@ export default {
     },
     fnUpdateNetworkInterfaces()
     {
+      console.log('fnUpdateNetworkInterfaces')
+
       var oNetworkInterfaces = os.networkInterfaces()
       var oThis = this
 
@@ -232,24 +240,146 @@ export default {
           oNetworkInterfaces[sInterfaceName]
             .forEach(function (oInterface) 
             {
+              console.log('oInterface', sInterfaceName, oInterface)
+
               if ('IPv4' !== oInterface.family || oInterface.internal !== false) {
                 // skip over internal (i.e. 127.0.0.1) and non-ipv4 addresses
                 return
               }
 
               if (alias >= 1) {
-                oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName].push(oInterface.address)
+                oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName].push(oInterface)
                 // this single interface has multiple ipv4 addresses
                 //console.log(sInterfaceName + ':' + alias, oInterface.address)
               } else {
-                oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName] = []
-                oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName].push(oInterface.address)
+                Vue.set(oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces, sInterfaceName, [])
+                //oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName] = []
+                oThis.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName].push(oInterface)
                 // this interface has only one ipv4 adress
                 //console.log(sInterfaceName, oInterface.address)
               }
               ++alias
             })
         })
+    },
+
+    fnGetFirstInterface()
+    {
+      var aKeys = Object.keys(this.oConfiguration.oCurrentComputer.oNetworkInterfaces)
+
+      if (!aKeys.length) {
+        return '' // 'Нет сетевых интерфейсов'
+      }
+
+      return aKeys[0]
+    },
+    fnIfInterfaceHasIP(sInterfaceName, sIP)
+    {
+      if (!sInterfaceName) {
+        return false
+      }
+      
+      if (!sIP) {
+        return false
+      }
+
+      var aInterface = this.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName]
+
+      for (var oIP of aInterface) {
+        if (oIP.address==sIP) {
+          return true
+        }
+      }
+
+      return false
+    },
+    fnGetFirstInterfaceIP(sInterfaceName='')
+    {
+      if (!sInterfaceName) {
+        sInterfaceName = this.fnGetFirstInterface()
+      }
+      
+      if (!sInterfaceName) {
+        return '' // 'Нет сетевых интерфейсов'
+      }
+
+      var oIP = this.oConfiguration.oCurrentComputer.oNetworkInterfaces[sInterfaceName][0]
+
+      return (oIP && oIP.address) || '' //'Нет IP'
+    },
+    fnGetCurrentInterface()
+    {
+      var oCurrentComputer = this.oConfiguration.oCurrentComputer
+
+      console.log('fnGetCurrentInterface', oCurrentComputer.oNetworkInterfaces, oCurrentComputer.sSelectedInterface, oCurrentComputer.iSelectedIPIndex)
+
+      var oInterface = oCurrentComputer.oNetworkInterfaces[oCurrentComputer.sSelectedInterface][oCurrentComputer.iSelectedIPIndex]
+
+      if (!oInterface) {
+        throw new Error("oInterface is undefined")
+      }
+
+      return oInterface
+    },
+    fnStartLocalNetworkMonitoring()
+    {
+      console.log('fnStartLocalNetworkMonitoring')
+
+      if (!this.bScanLocalNetworks) {
+        console.log('fnStartLocalNetworkMonitoring - !this.bScanLocalNetworks')
+        return
+      }
+
+      var oThis = this
+      var oInterface
+      var iRetryTimeout = 5000
+
+      try {
+        oInterface = this.fnGetCurrentInterface()
+      } catch(oError) {
+        setTimeout(function() {
+          oThis.fnStartLocalNetworkMonitoring()
+        }, iRetryTimeout)
+
+        return
+      }
+
+      console.log('fnStartLocalNetworkMonitoring - oInterface', oInterface)
+
+      var oOptions = {
+        target: oInterface.cidr,
+        port: '3030',
+        status: 'TROU', // Timeout, Refused, Open, Unreachable
+        banner: true
+      }
+
+      var oScanner = new evilscan(oOptions)
+
+      oScanner.on('start', function() {
+        console.log('fnStartLocalNetworkMonitoring - start')
+      })
+
+      oScanner.on('result', function(data) {
+        // fired when item is matching options
+        console.log('fnStartLocalNetworkMonitoring - result', data)
+
+        if (data.status=="open") {
+          //data.ip
+        }
+      })
+
+      oScanner.on('error',function(err) {
+        console.log('fnStartLocalNetworkMonitoring - error', err)
+      })
+
+      oScanner.on('done',function() {
+        setTimeout(function() {
+          oScanner.run()
+          //oThis.fnStartLocalNetworkMonitoring()
+        }, iRetryTimeout)
+      })
+
+      oScanner.run()     
     }
   },
 
@@ -262,11 +392,36 @@ export default {
     var aComputersListKeys = Object.keys(this.oConfiguration.oComputersList)
 
     if (!this.oConfiguration.sCurrentTab && aComputersListKeys.length) {      
-      this.oConfiguration.sCurrentTab = aComputersListKeys[0]
+      Vue.set(this.oConfiguration, 'sCurrentTab', aComputersListKeys[0])
+      //this.oConfiguration.sCurrentTab = aComputersListKeys[0]
     }
 
     this.fnUpdateComputerListValues()
     this.fnUpdateNetworkInterfaces()
+
+    var oCurrentComputer = this.oConfiguration.oCurrentComputer
+
+    if (!oCurrentComputer.sName) {
+      Vue.set(oCurrentComputer, 'sName', os.userInfo().username)
+      //oCurrentComputer.sName = os.userInfo().username
+      console.log('!oCurrentComputer.sName', 'os.userInfo().username', oCurrentComputer.sName)
+    }
+
+    if (!oCurrentComputer.sSelectedInterface) {
+      Vue.set(oCurrentComputer, 'sSelectedInterface', this.fnGetFirstInterface())
+      //oCurrentComputer.sSelectedInterface = this.fnGetFirstInterface()
+      console.log('!oCurrentComputer.sSelectedInterface', 'this.fnGetFirstInterface()', oCurrentComputer.sSelectedInterface)
+    }
+
+    if (!this.fnIfInterfaceHasIP(oCurrentComputer.sSelectedInterface, oCurrentComputer.sSelectedIP)) {
+      Vue.set(oCurrentComputer, 'iSelectedIPIndex', 0)
+      Vue.set(oCurrentComputer, 'sSelectedIP', this.fnGetFirstInterfaceIP(oCurrentComputer.sSelectedInterface))
+      //oCurrentComputer.iSelectedIPIndex = 0
+      //oCurrentComputer.sSelectedIP = this.fnGetFirstInterfaceIP(oCurrentComputer.sSelectedInterface)
+      console.log('!fnIfInterfaceHasIP(oCurrentComputer.sSelectedInterface, oCurrentComputer.sSelectedIP)', 'this.fnGetFirstInterfaceIP(oCurrentComputer.sSelectedInterface)', oCurrentComputer.sSelectedIP)
+    }
+
+    this.fnStartLocalNetworkMonitoring()
 
     console.log('this.oConfiguration.sCurrentTab', this.oConfiguration.sCurrentTab)
   }

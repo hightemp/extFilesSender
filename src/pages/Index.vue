@@ -6,12 +6,14 @@
       class="col-2"
     >
       <q-tab 
-        :name="oConfiguration.oCurrentComputer.sName" 
-        :label="oConfiguration.oCurrentComputer.sName+' ('+fnFirstIP()+')'"
+        name="current_user" 
+        :label="oConfiguration.oCurrentComputer.sName"
         no-caps
         dense
         :ripple="{center:true}"
       >
+        {{oConfiguration.oCurrentComputer.sSelectedInterface}}<br>
+        {{oConfiguration.oCurrentComputer.sSelectedIP}}
       </q-tab>
 
       <q-separator/>
@@ -24,6 +26,7 @@
         dense
         :alert="oItem.bAlert ? 'red' : false"
         :ripple="{center:true}"
+        :class="oConfiguration.oStatusStyles[oItem.sStatus].sStyle"
       >
         <q-badge 
           :color="oConfiguration.oStatusStyles[oItem.sStatus].sStyle" 
@@ -32,6 +35,15 @@
           {{ oConfiguration.oStatusStyles[oItem.sStatus].sName }}
         </q-badge>
       </q-tab>
+
+      <q-separator/>
+
+      <q-btn 
+        flat 
+        label="Добавить адрес" 
+        @click="fnShowAddAddressWindow"
+      />
+
     </q-tabs>
     <q-tab-panels
       v-model="oConfiguration.sCurrentTab"
@@ -40,6 +52,16 @@
       transition-next="jump-up"
       class="col-10"
     >
+      <q-tab-panel 
+        name="current_user" 
+        class="column"
+      >
+        <div class="col-auto q-mb-md">
+          <div class="text-h4 q-mb-md">{{oConfiguration.oCurrentComputer.sName}} ({{oConfiguration.oCurrentComputer.sSelectedInterface}} - {{oConfiguration.oCurrentComputer.sSelectedIP}})</div>
+
+          <!-- q-input outlined v-model="sFilterFileText" label="Фильтр" /-->
+        </div>
+      </q-tab-panel>
       <q-tab-panel 
         v-for="(oItem, sKey) in oConfiguration.oComputersList"
         :name="sKey" 
@@ -96,6 +118,27 @@
         </q-scroll-area>
       </q-tab-panel>
     </q-tab-panels>
+
+    <q-dialog v-model="bShowAddAddressWindow">
+      <q-card>
+        <q-card-section>
+          <div class="text-h6">Добавить адрес</div>
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-section style="max-height: 50vh" class="scroll">
+          
+        </q-card-section>
+
+        <q-separator />
+
+        <q-card-actions align="right">
+          <q-btn flat label="Отмена" color="primary" v-close-popup />
+          <q-btn flat label="Добавить" color="primary" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
@@ -103,6 +146,7 @@
 
 import moment from 'moment'
 import _ from 'lodash'
+import Vue from 'Vue'
 
 export default {
   name: 'PageIndex',
@@ -112,6 +156,11 @@ export default {
     return {
       sCurrentTab: '',
       sFilterFileText: '',
+      bShowAddAddressWindow: false,
+
+      oShowAddAddressWindowForm: {
+
+      },
 
       oConnections: {
 
@@ -150,13 +199,9 @@ export default {
   },
 
   methods: {
-    fnAllIPs()
+    fnShowAddAddressWindow()
     {
-      return (this.oConfiguration.oCurrentComputer.oNetworkInterfaces || [])
-    },
-    fnFirstIP()
-    {
-      return (this.fnAllIPs()[0] || '')
+
     },
     fnFilterItem(oItem)
     {
@@ -186,33 +231,51 @@ export default {
 
       return (aArray || []).slice().reverse()
     },
-    fnSendFile(sFilePath)
+    fnSendFile(sFilePath, sAddress)
     {
-      const ws = new WebSocket('ws://127.0.0.1:3030')
- 
-      ws.on('open', function open() {
-        ws.send('something')
-      })
-      
-      ws.on('message', function incoming(data) {
-        console.log(data)
-      })
+      var oWebSocket = this.fnConnect(sAddress)
+
+      oWebSocket.send(sFilePath)
+    },
+    fnConnect(sAddress)
+    {
+      if (this.oConnections[sAddress]) {
+        //delete this.oConnections[sAddress]
+        return this.oConnections[sAddress]
+      }
+
+      //var oWebSocket = new WebSocket(`ws://${sAddress}:3030`)
+      var oWebSocket = new WebSocket(`ws://127.0.0.1:3030`)
+
+      oWebSocket.onopen = function () {
+        oWebSocket.send('oWebSocket onopen')
+      }
+
+      oWebSocket.onmessage = function (oEvent) {
+        console.log('oWebSocket onmessage oEvent.data', oEvent.data)
+      }
+
+      oWebSocket.onerror = function() {
+        console.log('oWebSocket onerror')
+      }
+
+      oWebSocket.onclose = function(eventclose) {
+        console.log('oWebSocket соеденение закрыто причина: ' + this.eventclose)
+
+        Vue.delete(this.oConnections, sAddress)
+
+        this.fnUpdateConncetions()
+      }
+
+      return oWebSocket
     },
     fnUpdateConncetions()
     {
-      /*
-      Vue.set(this.oConnections, , {})
-      this.ws = new WebSocket('ws://localhost:8081/ws');
-      this.ws.onopen = function() {
-        console.log('WS подключенно')
-      };
-      this.ws.onclose = function(eventclose) {
-        console.log('соеденение закрыто причина: ' + this.eventclose)
+      for (var sAddress in this.oConfiguration.oComputersList) {
+        var oWebSocket = this.fnConnect(sAddress)
+
+        Vue.set(this.oConnections, sAddress, oWebSocket)
       }
-      this.ws.onmessage = function(msg) {
-        console.log('Сообщение ' + this.msg)
-      } 
-      */     
     }
   },
 
@@ -223,7 +286,7 @@ export default {
 
   mounted()
   {
-    this.fnSendFile()
+    this.fnUpdateConncetions()
   }
 }
 </script>
