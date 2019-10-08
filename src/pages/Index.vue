@@ -7,32 +7,38 @@
     >
       <q-tab 
         name="current_user" 
-        :label="oConfiguration.oCurrentComputer.sName"
+        :label="oConfiguration.oInfo.sName"
         no-caps
         dense
         :ripple="{center:true}"
       >
         {{oConfiguration.oCurrentComputer.sSelectedInterface}}<br>
         {{oConfiguration.oCurrentComputer.sSelectedIP}}
+        <q-badge 
+          :color="oConfiguration.oStatusStyles[oConfiguration.oInfo.sStatus].sStyle" 
+          text-color="white"
+        >
+          {{ oConfiguration.oStatusStyles[oConfiguration.oInfo.sStatus].sName }}
+        </q-badge>
       </q-tab>
 
       <q-separator/>
 
       <q-tab 
-        v-for="(oItem, sKey) in oConfiguration.oComputersList"
-        :name="sKey" 
-        :label="oItem.sName+' ('+sKey+')'"
+        v-for="(oItem, sAddress) in oConfiguration.oComputersList"
+        :name="sAddress" 
+        :label="oItem.oInfo.sName+' ('+sAddress+')'"
         no-caps
         dense
         :alert="oItem.bAlert ? 'red' : false"
         :ripple="{center:true}"
-        :class="oConfiguration.oStatusStyles[oItem.sStatus].sTabStyle"
+        :class="oConfiguration.oStatusStyles[oItem.oInfo.sStatus].sTabStyle"
       >
         <q-badge 
-          :color="oConfiguration.oStatusStyles[oItem.sStatus].sStyle" 
+          :color="oConfiguration.oStatusStyles[oItem.oInfo.sStatus].sStyle" 
           text-color="white"
         >
-          {{ oConfiguration.oStatusStyles[oItem.sStatus].sName }}
+          {{ oConfiguration.oStatusStyles[oItem.oInfo.sStatus].sName }}
         </q-badge>
       </q-tab>
 
@@ -60,20 +66,46 @@
         class="column"
       >
         <div class="col-auto q-mb-md">
-          <div class="text-h4 q-mb-md">{{oConfiguration.oCurrentComputer.sName}} ({{oConfiguration.oCurrentComputer.sSelectedInterface}} - {{oConfiguration.oCurrentComputer.sSelectedIP}})</div>
+          <div class="text-h4 q-mb-md">{{oConfiguration.oInfo.sName}} ({{oConfiguration.oCurrentComputer.sSelectedInterface}} - {{oConfiguration.oCurrentComputer.sSelectedIP}})</div>
 
           <!-- q-input outlined v-model="sFilterFileText" label="Фильтр" /-->
         </div>
+        <div class="col">
+          <q-select v-model="oStatus" :options="aStatuses" label="Статус" />
+          <q-input v-model="oConfiguration.sFilesDirPath" label="Путь куда будут сохраняться файлы">
+            <template v-slot:prepend>
+              <!--q-icon name="place" /-->
+            </template>
+            <template v-slot:append>
+              <q-icon v-if="oConfiguration.sFilesDirPath==''" name="close" @click="oConfiguration.sFilesDirPath = ''" class="cursor-pointer" />
+              <q-icon name="folder" @click="fnSelectFilesDirPath" style="cursor:pointer"/>
+            </template>
+          </q-input>
+        </div>
       </q-tab-panel>
       <q-tab-panel 
-        v-for="(oItem, sKey) in oConfiguration.oComputersList"
-        :name="sKey" 
+        v-for="(oItem, sAddress) in oConfiguration.oComputersList"
+        :name="sAddress" 
         class="column"
       >
         <div class="col-auto q-mb-md">
-          <div class="text-h4 q-mb-md">{{ oItem.sName }} ({{ sKey }})</div>
+          <div class="text-h4 q-mb-md">{{ oItem.oInfo.sName }} ({{ sAddress }})</div>
 
-          <q-input outlined v-model="sFilterFileText" label="Фильтр" />
+          <div class="row">
+            <div class="col-11">
+              <q-input outlined v-model="sFilterFileText" label="Фильтр" />
+            </div>
+            <div class="col-1">
+              <q-btn 
+                flat 
+                no-caps
+                title="Отправить файлы" 
+                class="full-width full-height"
+                icon="send"
+                @click="fnSendFiles(sAddress)"
+              />
+            </div>
+          </div>
         </div>
 
         <q-scroll-area
@@ -90,6 +122,12 @@
               v-ripple
               v-if="fnFilterItem(oFile)"
             >
+              <q-item-section avatar>
+                <q-icon
+                  :name="oFile.sSendStatus == 'send' ? 'arrow_upward' : 'arrow_downward'" 
+                />
+              </q-item-section>
+
               <q-item-section>
                 <q-item-label>{{ oFile.sFileName }}</q-item-label>
                 <q-item-label caption lines="2">
@@ -164,10 +202,14 @@
 
 <script>
 
+import fs from 'fs'
 import moment from 'moment'
 import _ from 'lodash'
 import Vue from 'Vue'
 import path from 'path'
+import md5 from 'md5'
+
+const { dialog } = require('electron').remote
 
 export default {
   name: 'PageIndex',
@@ -175,6 +217,7 @@ export default {
   data()
   {
     return {
+      sStatus: '',
       sCurrentTab: '',
       sFilterFileText: '',
 
@@ -220,10 +263,72 @@ export default {
         Vue.set(oApplication, 'oConfiguration', oValue)
       },
       cache: false
+    },
+    oStatus: {
+      get()
+      {
+        console.log('oStatus - get')
+        return this.aStatuses.find((v) => v.value==this.oConfiguration.oInfo.sStatus)
+      },
+      set(oValue)
+      {
+        console.log('oStatus - set', oApplication.oConfiguration.oInfo, oValue)
+        Vue.set(oApplication.oConfiguration.oInfo, 'sStatus', oValue.value)
+
+        this.fnSendInfoToAll()
+      },
+      cache: false
+    },
+    aStatuses: {
+      get()
+      {
+        var aResult = []
+
+        for (var sKey in oApplication.oConfiguration.oStatusStyles) {
+          aResult.push({
+            label: oApplication.oConfiguration.oStatusStyles[sKey].sName,
+            value: sKey
+          })          
+        }
+
+        return aResult
+      }
     }
   },
 
   methods: {
+    fnSelectFilesDirPath()
+    {
+      var aSelectedPaths = dialog.showOpenDialog({ 
+        title: "Выбрать папку для сохранения файлов",
+        //defaultPath: '',
+        properties: ['openDirectory', 'createDirectory '] 
+      })
+
+      if (!aSelectedPaths) {
+        return
+      }
+
+      oApplication.oConfiguration.sFilesDirPath = aSelectedPaths[0]
+    },
+    fnSendFiles(sAddress)
+    {
+      var aSelectedPaths = dialog.showOpenDialog({ 
+        title: "Отправить файлы",
+        //defaultPath: '',
+        properties: ['openFile', 'multiSelections'] 
+      })
+
+      if (!aSelectedPaths) {
+        return
+      }
+
+      var oThis = this
+
+      aSelectedPaths.forEach((sFilePath) => {
+        oThis.fnSendFile(sFilePath, sAddress)
+      })
+    },
     fnShowErrorMessage(sErrorWindowMessage)
     {
       this.bShowErrorWindow = true
@@ -231,13 +336,22 @@ export default {
     },
     fnAddAddress()
     {
-      var sIP = this.oShowAddAddressWindowForm.sIP
+      var sAddress = this.oShowAddAddressWindowForm.sIP
       
-      if (this.oComputersList[sIP]) {
-        return this.fnShowErrorMessage(`Адрес '${sIP}' уже есть в списке`)
+      if (this.oConfiguration.oComputersList[sAddress]) {
+        return this.fnShowErrorMessage(`Адрес '${sAddress}' уже есть в списке`)
       }
 
-      this.oShowAddAddressWindowForm.sIP
+      Vue.set(this.oConfiguration.oComputersList, sAddress, {
+        oInfo: {
+          sName: '',
+          sStatus: 'offline',
+        },
+        bAlert: false,
+        aFiles: []
+      })
+
+      this.fnUpdateConncetions()
     },
     fnShowAddAddressWindow()
     {
@@ -282,16 +396,82 @@ export default {
     {
       try {
         var oBuffer = fs.readFileSync(sFilePath)
+        const oStats = fs.statSync(sFilePath);
+
+        /**
+          sFileName: 'test.txt',
+          iSize: 100000,
+          sSize: '',
+          sStatus: 'wait',
+          iSendAt: 1318781876,
+          sSendAt: '',
+          sMD5: '78e731027d8fd50ed642340b7c9a63b3'
+         */
+
+        var iCurrentTimestamp = moment().unix()
+        var oFile = {
+          sFileName: path.basename(sFilePath),
+          iSize: oStats.size,
+          sSize: oApplication.fnIntToSize(oStats.size),
+          sStatus: 'wait',
+          iSendAt: iCurrentTimestamp,
+          sSendAt: oApplication.fnTimestampToDateTime(iCurrentTimestamp),
+          sMD5: md5(oBuffer)
+        }
+
+        this.fnAddFileToList(oFile, 'send', sAddress)
+
         var oData = {
           sType: "file",
-          sFileName: path.basename(sFilePath),
+          oFile,
           sPackedBuffer: JSON.stringify(oBuffer)
         }
 
-        fnSendObject(sAddress, oData)
+        this.fnSendObject(sAddress, oData)
       } catch(oError) {
         console.error(oError)
       }
+    },
+    fnAddFileToList(oFile, sSendStatus, sAddress)
+    {
+      console.log('fnAddFileToList', oFile, sSendStatus, sAddress)
+
+      var oFileCopy = Object.assign({ sSendStatus }, oFile)
+
+      if (!this.oConfiguration.oComputersList[sAddress]) {
+        console.error('!this.oConfiguration.oComputersList[sAddress]')
+        return
+      }
+
+      this.oConfiguration.oComputersList[sAddress].aFiles.push(oFileCopy)
+    },
+    fnSendObject(oWS, oObject)
+    {
+      oWS.send(JSON.stringify(oObject))
+    },
+    fnSendObjectToAll(oObject)
+    {
+      for (var sAddress in this.oConnections) {
+        this.fnSendObject(this.oConnections[sAddress], oObject)
+      }
+    },
+    fnSendInfo(oWS)
+    {
+      var oInfo = this.oConfiguration.oInfo
+
+      this.fnSendObject(oWS, {
+        sType: "info",
+        oInfo
+      })
+    },
+    fnSendInfoToAll()
+    {
+      var oInfo = this.oConfiguration.oInfo
+
+      this.fnSendObjectToAll({
+        sType: "info",
+        oInfo
+      })
     },
     fnConnect(sAddress)
     {
@@ -300,26 +480,73 @@ export default {
         return this.oConnections[sAddress]
       }
 
-      var oWebSocket = new WebSocket(`ws://${sAddress}:3030`)
+      var oThis = this
+      var oWebSocket = new WebSocket(`ws://${sAddress}:3032`)
+
+      var oInfo = this.oConfiguration.oInfo
 
       oWebSocket.onopen = function () {
-        oWebSocket.send('oWebSocket onopen')
+        oThis.fnSendInfo(oWebSocket)
       }
 
       oWebSocket.onmessage = function (oEvent) {
         console.log('oWebSocket onmessage oEvent.data', oEvent.data)
+
+        var oData = JSON.parse(oEvent.data)
+
+        if (oData.sType === "info") {
+          console.log('recieved info', oData.oInfo)
+
+          var oClientInfo = {
+            sName: '',
+            sStatus: 'offline',
+          }
+
+          oClientInfo = Object.assign(oClientInfo, oData.oInfo)
+
+          Vue.set(oApplication.oConfiguration.oComputersList[sAddress], 'oInfo', oClientInfo)
+          oThis.$forceUpdate()
+
+          console.log('recieved info -> ', sAddress, oThis.oConfiguration.oComputersList[sAddress])
+        }
+
+        if (oData.sType === "file") {
+          console.log('recieved file', oData.oFile)
+
+          var oClientFile = {
+            sFileName: '',
+            iSize: 0,
+            sSize: '',
+            sStatus: 'wait',
+            iSendAt: 0,
+            sSendAt: '',
+            sMD5: ''
+          }
+
+          oClientFile = Object.assign(oClientFile, oData.oFile)
+
+          oThis.fnAddFileToList(oClientFile, 'recieve', sAddress)
+
+          oApplication.oConfiguration.oComputersList[sAddress].aFiles.push(oClientFile)
+          oThis.$forceUpdate()
+
+          console.log('recieved file -> ', sAddress, oThis.oConfiguration.oComputersList[sAddress])
+        }
       }
 
       oWebSocket.onerror = function() {
         console.log('oWebSocket onerror')
+
+        Vue.set(oApplication.oConfiguration.oComputersList[sAddress].oInfo, 'sStatus', 'offline')
+        oThis.$forceUpdate()
       }
 
       oWebSocket.onclose = function(eventclose) {
         console.log('oWebSocket соеденение закрыто причина: ' + this.eventclose)
 
-        Vue.delete(this.oConnections, sAddress)
+        Vue.delete(oThis.oConnections, sAddress)
 
-        this.fnUpdateConncetions()
+        oThis.fnUpdateConncetions()
       }
 
       return oWebSocket
@@ -341,7 +568,14 @@ export default {
 
   mounted()
   {
-    this.fnUpdateConncetions()
+    var oThis = this
+
+    setInterval(
+      () => {
+        oThis.fnUpdateConncetions()
+      }, 
+      this.oConfiguration.iUpdateConnectionsIntervalInSeconds*1000
+    )
   }
 }
 </script>

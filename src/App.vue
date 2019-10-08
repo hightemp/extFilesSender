@@ -6,6 +6,7 @@
 
 <script>
 
+import fs from 'fs'
 import os from 'os' 
 import path from 'path'
 import moment from 'moment'
@@ -23,11 +24,18 @@ export default {
       sConfigurationFileName: 'config.json',
       sConfigurationDirPath: path.join(os.homedir(), '.appFilesSender'),
       sConfigurationFilePath: path.join(os.homedir(), '.appFilesSender', 'config.json'),
-      sFilesDirPath: path.join(os.homedir(), '.appFilesSender', 'files'),
 
       oConfiguration: {
         sCurrentTab: '',
         bScanLocalNetworks: false,
+        iUpdateConnectionsIntervalInSeconds: 2,
+
+        sFilesDirPath: path.join(os.homedir(), '.appFilesSender', 'files'),
+
+        oInfo: {
+          sName: '',
+          sStatus: 'online'
+        },
 
         oCurrentComputer: {
           sSelectedInterface: '',
@@ -35,8 +43,7 @@ export default {
           sSelectedIP: '',
           oNetworkInterfaces: {
 
-          },
-          sName: ''
+          }
         },
 
         oStatusStyles: {
@@ -50,7 +57,7 @@ export default {
             sTabStyle: 'bg-red-3',
             sName: 'Заблокирован'
           },
-          'accessed': {
+          'online': {
             sStyle: 'green',
             sTabStyle: 'bg-green-3',
             sName: 'Доступен'
@@ -75,18 +82,27 @@ export default {
           },
           'saved': {
             sStyle: 'grey',
-            sName: 'Скачен',
+            sName: 'Получен',
             sIcon: 'cloud_download'
+          },
+          'sent': {
+            sStyle: 'grey',
+            sName: 'Отправлен',
+            sIcon: 'send'
           }
         },
 
         oComputersList: {
+          /*
           '192.168.1.1': {
-            sName: 'test',
-            sStatus: 'offline',
+            oInfo: {
+              sName: 'test',
+              sStatus: 'offline'
+            },
             bAlert: true,
             aFiles: [
               {
+                // sSendStatus: 'send', //'recieve'
                 sFileName: 'test.txt',
                 iSize: 100000,
                 sSize: '',
@@ -134,6 +150,7 @@ export default {
             sStatus: 'accessed',
             bAlert: false
           },
+          */
         }
       }
     }
@@ -186,9 +203,9 @@ export default {
           }
         }
 
-        if (!fs.existsSync(this.sFilesDirPath)) {
-          if (fs.mkdirSync(this.sFilesDirPath)) {
-            console.log(this.sFilesDirPath + ' directory created')
+        if (!fs.existsSync(this.oConfiguration.sFilesDirPath)) {
+          if (fs.mkdirSync(this.oConfiguration.sFilesDirPath)) {
+            console.log(this.oConfiguration.sFilesDirPath + ' directory created')
           }
         }
 
@@ -398,16 +415,20 @@ export default {
       Vue.set(this.oConfiguration, 'sCurrentTab', aComputersListKeys[0])
       //this.oConfiguration.sCurrentTab = aComputersListKeys[0]
     }
+    if (!this.oConfiguration.sCurrentTab && !aComputersListKeys.length) {
+      Vue.set(this.oConfiguration, 'sCurrentTab', 'current_user')
+    }
 
     this.fnUpdateComputerListValues()
     this.fnUpdateNetworkInterfaces()
 
+    var oInfo = this.oConfiguration.oInfo
     var oCurrentComputer = this.oConfiguration.oCurrentComputer
 
-    if (!oCurrentComputer.sName) {
-      Vue.set(oCurrentComputer, 'sName', os.userInfo().username)
-      //oCurrentComputer.sName = os.userInfo().username
-      console.log('!oCurrentComputer.sName', 'os.userInfo().username', oCurrentComputer.sName)
+    if (!oInfo.sName) {
+      Vue.set(oInfo, 'sName', os.userInfo().username)
+      //oInfo.sName = os.userInfo().username
+      console.log('!oInfo.sName', 'os.userInfo().username', oInfo.sName)
     }
 
     if (!oCurrentComputer.sSelectedInterface) {

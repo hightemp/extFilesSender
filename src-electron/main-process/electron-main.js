@@ -14,9 +14,10 @@ ipcMain.on('notify-message', (oEvent, oArgs) => {
   (new Notification(oArgs)).show()
 })
 
+/*
 const WebSocket = require('ws')
 
-const wss = new WebSocket.Server({ port: 3030 });
+const wss = new WebSocket.Server({ port: 3032 });
  
 wss.on('connection', function connection(ws) {
   ws.on('message', function incoming(message) {
@@ -25,6 +26,7 @@ wss.on('connection', function connection(ws) {
  
   ws.send('something');
 });
+*/
 
 let mainWindow
 
