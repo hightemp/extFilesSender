@@ -1,6 +1,6 @@
-# Quasar App (app_files_sender)
+# extFilesSender
 
-A Quasar Framework app
+Google Chrome extension for sending files using WebSocket protocol.
 
 ## Install the dependencies
 ```bash

@@ -21,7 +21,9 @@
     "socket",
     {
       "fileSystem": [
-        "write"
+        "write", 
+        "retainEntries", 
+        "directory"
       ]
     }
   ],
