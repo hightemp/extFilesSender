@@ -1,10 +1,16 @@
+const downloadsFolder = require('downloads-folder')
 const moment = require('moment')
 const path = require('path')
 const fs = require('fs')
 const WebSocket = require('ws')
 const md5 = require('md5')
 
+//console.log(downloadsFolder())
+//process.exit(0)
+
 const oWSS = new WebSocket.Server({ port: 3032 })
+
+var oComputersList = {} 
 
 var oBuffer = fs.readFileSync('app-icon.png')
 var sBuffer = JSON.stringify(oBuffer)
@@ -52,6 +58,88 @@ function fnSendFile(oWS, sFilePath)
   fnSendObject(oWS, oData)
 }
 */
+function fnAddAddress(sAddress)
+{
+  if (oComputersList[sAddress]) {
+    return
+  }
+
+  oComputersList[sAddress] = {
+    oInfo: {
+      sName: '',
+      sStatus: 'offline',
+    },
+    bAlert: false,
+    aFiles: []
+  }
+}
+function fnAddFileToList(oFile, sSendStatus, sAddress)
+{
+  var oDefaultFile = {
+    sFileName: '',
+    iSize: 0,
+    sSize: '',
+    sStatus: 'wait',
+    iSendAt: 0,
+    sSendAt: '',
+    sMD5: '',
+    sSendStatus: sSendStatus
+  }
+
+  var oNewFile = Object.assign(oDefaultFile, oFile)
+
+  if (!oComputersList[sAddress]) {
+    console.error('!oComputersList[sAddress]')
+    return
+  }
+
+  oComputersList[sAddress].aFiles.push(oNewFile)
+}
+function fnFileToFileObject(sFilePath)
+{
+  var oBuffer = fs.readFileSync(sFilePath)
+  const oStats = fs.statSync(sFilePath);
+
+  /**
+    sFileName: 'test.txt',
+    iSize: 100000,
+    sSize: '',
+    sStatus: 'wait',
+    iSendAt: 1318781876,
+    sSendAt: '',
+    sMD5: '78e731027d8fd50ed642340b7c9a63b3'
+    */
+
+  var iCurrentTimestamp = moment().unix()
+  var oFile = {
+    sFileName: path.basename(sFilePath),
+    iSize: oStats.size,
+    sSize: fnIntToSize(oStats.size),
+    sStatus: 'wait',
+    iSendAt: iCurrentTimestamp,
+    sSendAt: fnTimestampToDateTime(iCurrentTimestamp),
+    sMD5: md5(oBuffer)
+  }
+
+  return oFile
+}
+function fnSendFileRecieveConfirmation(oWS, sFilePath)
+{
+  try {
+    var oFile = fnFileToFileObject(sFilePath)
+
+    fnAddFileToList(oFile, 'send', sAddress)
+
+    var oData = {
+      sType: "file_confirm",
+      oFile
+    }
+
+    fnSendObject(oWS, oData)
+  } catch(oError) {
+    console.error(oError)
+  }
+}
 function fnSendFile(oWS, sFilePath)
 {
   try {
@@ -112,12 +200,18 @@ var oInfo = {
   sStatus: 'online'
 }
 
+process.on('SIGTERM SIGPIPE SIGHUP SIGINT SIGBREAK SIGWINCH SIGKILL SIGSTOP', (signal) => {
+  fs.writeFileSync('websocket_server_test.log', `Received ${signal}`);
+})
+
 process.on('SIGINT', () => {
   console.log("Caught interrupt signal")
   process.exit()
 })
 
-oWSS.on('connection', (oWS) => {
+oWSS.on('connection', (oWS, oRequest) => {
+  fnAddAddress(oRequest.connection.remoteAddress)
+
   setInterval(() => {
     oInfo.sStatus = aStatuses.find((v, i, a) => i === Math.round(Math.random() * a.length))
     oInfo.sName = 'user' + Math.round(Math.random() * 100)
@@ -129,8 +223,8 @@ oWSS.on('connection', (oWS) => {
   }, 5000)
 
   setInterval(() => {
-    fnSendFile(oWS, 'app-icon.png')
-  }, 10000)
+    fnSendFileRecieveConfirmation(oWS, 'app-icon.png')
+  }, 30000)
 
   oWS.on('message', (sData) => {
     console.log('received: %s', sData)
@@ -147,6 +241,14 @@ oWSS.on('connection', (oWS) => {
       })
     }
 
+    if (oData.sType === "file") {
+      console.log('recieved file')
+    }
+
+    if (oData.sType === "file") {
+      console.log('recieved file')
+    }
+    
     if (oData.sType === "file") {
       var oBuffer = fnRecieveFile(oWS, oData)
       console.log('recieved file', oData.sFileName, oBuffer.length)

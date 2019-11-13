@@ -6,14 +6,15 @@
 
 <script>
 
-import fs from 'fs'
-import os from 'os' 
+const downloadsFolder = require('downloads-folder')
+import fs from '~/lib/fs.js'
+import os from '~/lib/os.js' 
 import path from 'path'
 import moment from 'moment'
 import { Notify } from 'quasar'
-const { ipcRenderer } = require('electron')
+// const { ipcRenderer } = require('electron')
 import Vue from 'Vue'
-var evilscan = require('evilscan')
+import http from '~/lib/http.js'
 
 export default {
   name: 'App',
@@ -30,7 +31,12 @@ export default {
         bScanLocalNetworks: false,
         iUpdateConnectionsIntervalInSeconds: 2,
 
-        sFilesDirPath: path.join(os.homedir(), '.appFilesSender', 'files'),
+        sFilesDirPath: '',
+        bFilesDirPathValid: false,
+        iFilesDirPathCheckIntervalInSeconds: 5,
+
+        iWSSPort: 3033,
+        iWSPort: 3033,
 
         oInfo: {
           sName: '',
@@ -78,6 +84,11 @@ export default {
           'error': {
             sStyle: 'red',
             sName: 'Ошибка',
+            sIcon: 'error'
+          },
+          'canceled': {
+            sStyle: 'red',
+            sName: 'Отменен',
             sIcon: 'error'
           },
           'saved': {
@@ -185,12 +196,6 @@ export default {
     fnNotify(oArguments)
     {
       console.log('fnNotify', oArguments)
-      /*
-      ipcRenderer.on('asynchronous-reply', (event, oArguments) => {
-        console.log(arg) // prints "pong"
-      })
-      */
-      ipcRenderer.send('notify-message', oArguments)
     },
     fnSaveConfiguration() 
     {
@@ -200,12 +205,6 @@ export default {
         if (!fs.existsSync(this.sConfigurationDirPath)) {
           if (fs.mkdirSync(this.sConfigurationDirPath)) {
             console.log(this.sConfigurationDirPath + ' directory created')
-          }
-        }
-
-        if (!fs.existsSync(this.oConfiguration.sFilesDirPath)) {
-          if (fs.mkdirSync(this.oConfiguration.sFilesDirPath)) {
-            console.log(this.oConfiguration.sFilesDirPath + ' directory created')
           }
         }
 
@@ -362,44 +361,25 @@ export default {
         }, iRetryTimeout)
 
         return
-      }
+      }  
+    },
+    fnCheckFilesDirPath()
+    {
+      this.oConfiguration.bFilesDirPathValid = fs.existsSync(this.oConfiguration.sFilesDirPath)
 
-      console.log('fnStartLocalNetworkMonitoring - oInterface', oInterface)
+      return this.oConfiguration.bFilesDirPathValid
+    },
+    fnStartCheckFilesDirPathTimer()
+    {
+      var oThis = this
 
-      var oOptions = {
-        target: oInterface.cidr,
-        port: '3030',
-        status: 'TROU', // Timeout, Refused, Open, Unreachable
-        banner: true
-      }
-
-      var oScanner = new evilscan(oOptions)
-
-      oScanner.on('start', function() {
-        console.log('fnStartLocalNetworkMonitoring - start')
-      })
-
-      oScanner.on('result', function(data) {
-        // fired when item is matching options
-        console.log('fnStartLocalNetworkMonitoring - result', data)
-
-        if (data.status=="open") {
-          //data.ip
-        }
-      })
-
-      oScanner.on('error',function(err) {
-        console.log('fnStartLocalNetworkMonitoring - error', err)
-      })
-
-      oScanner.on('done',function() {
-        setTimeout(function() {
-          oScanner.run()
-          //oThis.fnStartLocalNetworkMonitoring()
-        }, iRetryTimeout)
-      })
-
-      oScanner.run()     
+      setTimeout(
+        () => {
+          oThis.fnCheckFilesDirPath()
+          oThis.fnStartCheckFilesDirPathTimer()
+        }, 
+        oThis.oConfiguration.iFilesDirPathCheckIntervalInSeconds*1000
+      )
     }
   },
 
@@ -427,25 +407,33 @@ export default {
 
     if (!oInfo.sName) {
       Vue.set(oInfo, 'sName', os.userInfo().username)
-      //oInfo.sName = os.userInfo().username
       console.log('!oInfo.sName', 'os.userInfo().username', oInfo.sName)
     }
 
     if (!oCurrentComputer.sSelectedInterface) {
       Vue.set(oCurrentComputer, 'sSelectedInterface', this.fnGetFirstInterface())
-      //oCurrentComputer.sSelectedInterface = this.fnGetFirstInterface()
       console.log('!oCurrentComputer.sSelectedInterface', 'this.fnGetFirstInterface()', oCurrentComputer.sSelectedInterface)
     }
 
     if (!this.fnIfInterfaceHasIP(oCurrentComputer.sSelectedInterface, oCurrentComputer.sSelectedIP)) {
       Vue.set(oCurrentComputer, 'iSelectedIPIndex', 0)
       Vue.set(oCurrentComputer, 'sSelectedIP', this.fnGetFirstInterfaceIP(oCurrentComputer.sSelectedInterface))
-      //oCurrentComputer.iSelectedIPIndex = 0
-      //oCurrentComputer.sSelectedIP = this.fnGetFirstInterfaceIP(oCurrentComputer.sSelectedInterface)
       console.log('!fnIfInterfaceHasIP(oCurrentComputer.sSelectedInterface, oCurrentComputer.sSelectedIP)', 'this.fnGetFirstInterfaceIP(oCurrentComputer.sSelectedInterface)', oCurrentComputer.sSelectedIP)
     }
 
-    this.fnStartLocalNetworkMonitoring()
+    if (!this.oConfiguration.sFilesDirPath) {
+      this.oConfiguration.sFilesDirPath = downloadsFolder()
+    }
+
+    if (!fs.existsSync(this.oConfiguration.sFilesDirPath)) {
+      if (fs.mkdirSync(this.oConfiguration.sFilesDirPath)) {
+        console.log(this.oConfiguration.sFilesDirPath + ' directory created')
+      }
+    }
+
+    this.fnStartCheckFilesDirPathTimer()
+
+    //this.fnStartLocalNetworkMonitoring()
 
     console.log('this.oConfiguration.sCurrentTab', this.oConfiguration.sCurrentTab)
   }

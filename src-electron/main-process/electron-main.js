@@ -8,33 +8,44 @@ if (process.env.PROD) {
   global.__statics = require('path').join(__dirname, 'statics').replace(/\\/g, '\\\\')
 }
 
+var oMainWindow
+
 ipcMain.on('notify-message', (oEvent, oArgs) => {
   //console.log('notify-message', oEvent, oArgs)
   //event.reply('asynchronous-reply', 'pong')
   (new Notification(oArgs)).show()
 })
 
-/*
-const WebSocket = require('ws')
+var oConnections = {}
 
-const wss = new WebSocket.Server({ port: 3032 });
- 
-wss.on('connection', function connection(ws) {
-  ws.on('message', function incoming(message) {
-    console.log('received: %s', message);
-  });
- 
-  ws.send('something');
-});
-*/
+ipcMain.on('start-wss', (oEvent, oArgs) => {
+  const WebSocket = require('ws')
 
-let mainWindow
+  const oWSS = new WebSocket.Server({ port: oArgs.iPort/*3032*/ })
+  
+  oWSS.on('connection', (oWS, oRequest) => {
+    var sAddress = oRequest.connection.remoteAddress
+
+    oConnections[sAddress] = oWS
+
+    oMainWindow.webContents.send('wss-connection', { sAddress })
+
+    oWS.on('message', (sMessage) => {
+      console.log('received: %s', sMessage)
+      oMainWindow.webContents.send('wss-message', { sAddress, oPackage:JSON.parse(sMessage) })
+    })
+   
+    ipcMain.on(`send-${sAddress}`, (oEvent, oArgs) => {
+      oWS.send(JSON.stringify(oArgs))
+    })
+  })
+})
 
 function createWindow () {
   /**
    * Initial window options
    */
-  mainWindow = new BrowserWindow({
+  oMainWindow = new BrowserWindow({
     width: 1000,
     height: 600,
     useContentSize: true,
@@ -43,10 +54,10 @@ function createWindow () {
     }
   })
 
-  mainWindow.loadURL(process.env.APP_URL)
+  oMainWindow.loadURL(process.env.APP_URL)
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  oMainWindow.on('closed', () => {
+    oMainWindow = null
   })
 
   //var oImageBuffer = Buffer.from(require('!!raw-loader!../icons/linux-32x32.png').default, "binary")
@@ -81,7 +92,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (mainWindow === null) {
+  if (oMainWindow === null) {
     createWindow()
   }
 })

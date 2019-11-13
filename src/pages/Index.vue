@@ -202,14 +202,15 @@
 
 <script>
 
-import fs from 'fs'
+import fs from '~/lib/fs.js'
 import moment from 'moment'
 import _ from 'lodash'
 import Vue from 'Vue'
 import path from 'path'
 import md5 from 'md5'
 
-const { dialog } = require('electron').remote
+// const { dialog } = require('electron').remote
+// const { ipcRenderer } = require('electron')
 
 export default {
   name: 'PageIndex',
@@ -299,7 +300,7 @@ export default {
   methods: {
     fnSelectFilesDirPath()
     {
-      var aSelectedPaths = dialog.showOpenDialog({ 
+      var aSelectedPaths = dialog.showOpenDialogSync({ 
         title: "Выбрать папку для сохранения файлов",
         //defaultPath: '',
         properties: ['openDirectory', 'createDirectory '] 
@@ -336,20 +337,32 @@ export default {
     },
     fnAddAddress()
     {
+      console.log('fnAddAddress')
+
       var sAddress = this.oShowAddAddressWindowForm.sIP
       
       if (this.oConfiguration.oComputersList[sAddress]) {
         return this.fnShowErrorMessage(`Адрес '${sAddress}' уже есть в списке`)
       }
 
-      Vue.set(this.oConfiguration.oComputersList, sAddress, {
-        oInfo: {
-          sName: '',
-          sStatus: 'offline',
-        },
-        bAlert: false,
-        aFiles: []
-      })
+      this.fnAddAddressToComputersList(sAddress)
+    },
+    fnAddAddressToComputersList(sAddress)
+    {
+      console.log('fnAddAddressToComputersList')
+
+      if (!this.oConfiguration.oComputersList[sAddress]) {
+        console.log('fnAddAddressToComputersList - !this.oConfiguration.oComputersList[sAddress]', sAddress)
+
+        Vue.set(this.oConfiguration.oComputersList, sAddress, {
+          oInfo: {
+            sName: '',
+            sStatus: 'offline',
+          },
+          bAlert: false,
+          aFiles: []
+        })
+      }
 
       this.fnUpdateConncetions()
     },
@@ -432,18 +445,45 @@ export default {
         console.error(oError)
       }
     },
+    fnUpdateInfo(oInfo)
+    {
+      var oClientInfo = {
+        sName: '',
+        sStatus: 'offline',
+      }
+
+      oClientInfo = Object.assign(oClientInfo, oInfo)
+
+      Vue.set(oApplication.oConfiguration.oComputersList[sAddress], 'oInfo', oClientInfo)
+      this.$forceUpdate()
+    },
     fnAddFileToList(oFile, sSendStatus, sAddress)
     {
       console.log('fnAddFileToList', oFile, sSendStatus, sAddress)
 
-      var oFileCopy = Object.assign({ sSendStatus }, oFile)
+      var oDefaultFile = {
+        sFileName: '',
+        iSize: 0,
+        sSize: '',
+        sStatus: 'wait',
+        iSendAt: 0,
+        sSendAt: '',
+        sMD5: '',
+        sSendStatus: sSendStatus
+      }
+
+      var oNewFile = Object.assign(oDefaultFile, oFile)
 
       if (!this.oConfiguration.oComputersList[sAddress]) {
         console.error('!this.oConfiguration.oComputersList[sAddress]')
         return
       }
 
-      this.oConfiguration.oComputersList[sAddress].aFiles.push(oFileCopy)
+      this.oConfiguration.oComputersList[sAddress].aFiles.push(oNewFile)
+
+      this.$forceUpdate()
+
+      return oNewFile
     },
     fnSendObject(oWS, oObject)
     {
@@ -454,6 +494,17 @@ export default {
       for (var sAddress in this.oConnections) {
         this.fnSendObject(this.oConnections[sAddress], oObject)
       }
+    },
+    fnSendFileAcceptConfirm(oWS, oSendFile)
+    {
+      var oFile = Object.assign({}, oSendFile)
+
+      delete oFile.sSendStatus
+
+      this.fnSendObject(oWS, {
+        sType: "file_accept",
+        oFile
+      })
     },
     fnSendInfo(oWS)
     {
@@ -497,38 +548,57 @@ export default {
         if (oData.sType === "info") {
           console.log('recieved info', oData.oInfo)
 
-          var oClientInfo = {
-            sName: '',
-            sStatus: 'offline',
-          }
-
-          oClientInfo = Object.assign(oClientInfo, oData.oInfo)
-
-          Vue.set(oApplication.oConfiguration.oComputersList[sAddress], 'oInfo', oClientInfo)
-          oThis.$forceUpdate()
+          oThis.fnUpdateInfo(oData.oInfo)
 
           console.log('recieved info -> ', sAddress, oThis.oConfiguration.oComputersList[sAddress])
         }
 
-        if (oData.sType === "file") {
-          console.log('recieved file', oData.oFile)
+        // Получение уведомления о получении файла
+        if (oData.sType === "file_confirm") {
+          console.log('recieve file_confirm', oData)
 
-          var oClientFile = {
-            sFileName: '',
-            iSize: 0,
-            sSize: '',
-            sStatus: 'wait',
-            iSendAt: 0,
-            sSendAt: '',
-            sMD5: ''
+          // Добавляем файл в список файлов к IP клиента
+          var oFile = oThis.fnAddFileToList(oData.oFile, 'recieve', sAddress)
+          var sName = oThis.oConfiguration.oComputersList[sAddress].oInfo.sName
+
+          // Запрашиваем подтверждение на получение
+          var iConfirmMessageBoxResult = dialog.showMessageBoxSync({
+            title: "Получить файл?",
+            message: `
+От: ${sName}(${sAddress})
+Файл: ${oData.oFile.sFileName}
+Размер: ${oData.oFile.sSize}
+Дата: ${oData.oFile.sSendAt}
+MD5: ${oData.oFile.sMD5}
+`,
+            type: "question",
+            buttons: ["Отклонить", "Принять"]
+          })
+
+          if (iConfirmMessageBoxResult==1) {
+            // Если нажата кнопка Принять, то ставим статус файла в sending
+            // И отправляем сообщение 
+            Vue.set(oFile, 'sStatus', 'sending')
+
+            oThis.fnSendFileAcceptConfirm(oWebSocket, oFile)
+          } else {
+            // Если нажата кнопка Отклонить, то ставим статус файла в canceled
+            Vue.set(oFile, 'sStatus', 'canceled')
           }
 
-          oClientFile = Object.assign(oClientFile, oData.oFile)
-
-          oThis.fnAddFileToList(oClientFile, 'recieve', sAddress)
-
-          oApplication.oConfiguration.oComputersList[sAddress].aFiles.push(oClientFile)
           oThis.$forceUpdate()
+
+          console.log('recieved file_confirm -> ', sAddress, oThis.oConfiguration.oComputersList[sAddress])
+        }
+
+        // Получение файла
+        if (oData.sType === "file") {
+          console.log('recieved file', oData)
+
+          //oThis.fnAddFileToList(oClientFile, 'recieve', sAddress)
+
+          //oApplication.oConfiguration.oComputersList[sAddress].aFiles.push(oClientFile)
+          //oThis.$forceUpdate()
 
           console.log('recieved file -> ', sAddress, oThis.oConfiguration.oComputersList[sAddress])
         }
@@ -549,15 +619,33 @@ export default {
         oThis.fnUpdateConncetions()
       }
 
+      Vue.set(this.oConnections, sAddress, oWebSocket)
+
       return oWebSocket
     },
     fnUpdateConncetions()
     {
       for (var sAddress in this.oConfiguration.oComputersList) {
-        var oWebSocket = this.fnConnect(sAddress)
-
-        Vue.set(this.oConnections, sAddress, oWebSocket)
+        this.fnConnect(sAddress)
       }
+    },
+    fnStartUpdateConncetionsTimer()
+    {
+      var oThis = this
+
+      setTimeout(
+        () => {
+          oThis.fnUpdateConncetions()
+          oThis.fnStartUpdateConncetionsTimer()
+        }, 
+        oThis.oConfiguration.iUpdateConnectionsIntervalInSeconds*1000
+      )
+    },
+    fnStartWSS()
+    {
+      var oThis = this
+
+      ipcRenderer.send('start-wss', { iPort: oThis.oConfiguration.iWSSPort })
     }
   },
 
@@ -570,12 +658,13 @@ export default {
   {
     var oThis = this
 
-    setInterval(
-      () => {
-        oThis.fnUpdateConncetions()
-      }, 
-      this.oConfiguration.iUpdateConnectionsIntervalInSeconds*1000
-    )
+    this.fnStartWSS()
+
+    ipcRenderer.on('wss-connection', (oEvent, oArgs) => {
+      oThis.fnAddAddressToComputersList(oArgs.sAddress)
+    })
+
+    this.fnStartUpdateConncetionsTimer()
   }
 }
 </script>
